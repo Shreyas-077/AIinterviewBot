@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Vapi Workflow Test</title>
+  </head>
+  <body>
+    <h2>Vapi Workflow Running...</h2>
+    <script type="module">
+      import Vapi from 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi-ai-web.es.js';
+
+      const vapi = new Vapi("6a9a008c-c0c2-48b3-8db5-29dfc1869ad8");
+      vapi.start({ workflowId: "ef9b83aa-fbd2-4ab3-9b35-4e8b7d8744e1" });
+    </script>
+  </body>
+</html>
