@@ -21,12 +21,14 @@ const page =  async () => {
   }
 
   // If no user and no candidate, layout will redirect to sign-in
-  // Continue with regular dashboard for users
+  if (!user) {
+    redirect('/sign-in');
+  }
 
+  // Continue with regular dashboard for users - now we know user exists
   const [userInterviews, latestInterviews] = await Promise.all([
-    await getInterviewByUserId(user?.id!),
-    await getLatestInterviews ({ userId: user?.id!})
-
+    getInterviewByUserId(user.id),
+    getLatestInterviews({ userId: user.id })
   ])
 
   

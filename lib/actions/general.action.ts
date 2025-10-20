@@ -23,18 +23,23 @@ export async function getInterviewByUserId(userId: string): Promise<Interview[] 
 export async function getLatestInterviews(params: GetLatestInterviewsParams): Promise<Interview[] | null> {
     const {userId, limit = 20} = params
 
+    // Simplified query to avoid composite index requirement
     const interviews = await db
     .collection('interviews')
-    .orderBy('createdAt' , 'desc')
     .where('finalized' , '==', true)
-    .where('userId' , '!=', userId)
+    .orderBy('createdAt' , 'desc')
     .limit(limit)
     .get();
 
-    return interviews.docs.map((doc)=> ({ 
-        id: doc.id,
-        ...doc.data()
-    }) ) as Interview[];
+    // Filter out user's own interviews in code instead of query
+    const filteredInterviews = interviews.docs
+        .map((doc) => ({ 
+            id: doc.id,
+            ...doc.data()
+        }) as Interview)
+        .filter(interview => interview.userId !== userId);
+
+    return filteredInterviews;
 }
 
 export async function getInterviewById(id: string): Promise<Interview | null> {
