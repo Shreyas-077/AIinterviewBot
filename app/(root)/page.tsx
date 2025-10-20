@@ -61,7 +61,7 @@ const page =  async () => {
         className='max-sm:hidden  ' />
       </section>
         <section className='flex flex-col gap-6 mt-8'>
-          <h2>Your Interviews</h2>
+          <h2>Scheduled Interviews</h2>
           <div className='interviews-section'>
             {
             
@@ -75,7 +75,7 @@ const page =  async () => {
                  />
               ))
             ) : (
-              <p>You Haven't taken any interviews yet</p> 
+              <p>You have no scheduled interviews yet</p> 
             )
           }
           
@@ -83,25 +83,6 @@ const page =  async () => {
 
 
         </div>
-      </section>
-      <section className='flex flex-col gap-6 mt-8 '>
-          <h2>Take an Interview</h2>
-          <div className='interviews-section'>
-             {
-          
-          hasUpcomingInterviews ? (
-            latestInterviews?.map((interview) =>(
-               <InterviewCard 
-                 {...interview} 
-                 key={interview.id} 
-                 showDelete={false}  // Don't show delete for other interviews
-                 completed={interview.completed}  // Pass completion status
-               />
-            ))
-          ) : (
-            <p>There are no new interviews avaliable</p> 
-          )
-          }          </div>
       </section>
     </>
   )

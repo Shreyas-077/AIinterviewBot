@@ -47,7 +47,7 @@ If any information is unclear or missing, make a reasonable assumption based on 
                     techstack: z.string().describe('Technologies mentioned as comma-separated (e.g., React, Node.js, TypeScript)'),
                     type: z.string().describe('Interview type mentioned (e.g., Technical, Behavioral, Mixed)'),
                     amount: z.string().describe('Number of questions mentioned (e.g., 5, 10, 15)'),
-                    email: z.string().describe('Email address provided by the user (e.g., user@example.com)'),
+                    email: z.string().describe('Email addresses provided by the user. Can be single email or multiple emails separated by commas (e.g., user@example.com or user1@example.com, user2@example.com)'),
                 }),
                 prompt: `Extract interview preparation parameters from this conversation transcript:
 
@@ -92,10 +92,35 @@ Generate the questions now:`,
         // Parse the questions
         const questions = JSON.parse(questionsText.trim());
 
-        // Generate a unique session code (8 characters alphanumeric)
-        const sessionCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+        // Parse emails - handle both single and multiple emails
+        const emailsRaw = extractedData.email;
+        const emails = emailsRaw
+            .split(',')
+            .map((e: string) => e.trim().toLowerCase()) // Normalize to lowercase
+            .filter((e: string) => e.includes('@'))
+            .filter((e: string, index: number, self: string[]) => self.indexOf(e) === index); // Remove duplicates
+        
+        console.log('Parsed unique emails:', emails);
 
-        // Save the interview
+        if (emails.length === 0) {
+            throw new Error('No valid email addresses provided');
+        }
+
+        // Generate unique session codes for each candidate (ensure uniqueness)
+        const generateUniqueCode = () => {
+            return Math.random().toString(36).substring(2, 10).toUpperCase() + 
+                   Date.now().toString(36).substring(-2).toUpperCase(); // Add timestamp for extra uniqueness
+        };
+
+        const candidates = emails.map((email: string) => ({
+            email: email,
+            sessionCode: generateUniqueCode(),
+            completed: false
+        }));
+
+        console.log('Generated candidates with unique codes:', candidates);
+
+        // Save the interview with multiple candidates
         const interview = {
             role: extractedData.role,
             type: extractedData.type,
@@ -105,38 +130,45 @@ Generate the questions now:`,
             userId: userId,
             finalized: true,
             coverImage: getRandomInterviewCover(),
-            email: extractedData.email,
-            sessionCode: sessionCode,
+            candidates: candidates, // NEW: Array of candidates
+            // Legacy fields for backward compatibility
+            email: emails[0], // Keep first email as primary
+            sessionCode: candidates[0].sessionCode,
             createdAt: new Date().toISOString()
         };
 
         const interviewRef = await db.collection('interviews').add(interview);
         const interviewId = interviewRef.id;
 
-        // Send session code via email immediately
-        try {
-            const emailResponse = await fetch(`${request.headers.get('origin')}/api/send-session-code`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    email: extractedData.email,
-                    sessionCode: sessionCode,
-                    role: extractedData.role,
-                    interviewId: interviewId,
-                }),
-            });
+        // Send session code via email to ALL candidates
+        const emailPromises = candidates.map(async (candidate: { email: string; sessionCode: string }) => {
+            try {
+                const emailResponse = await fetch(`${request.headers.get('origin')}/api/send-session-code`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: candidate.email,
+                        sessionCode: candidate.sessionCode,
+                        role: extractedData.role,
+                        interviewId: interviewId,
+                    }),
+                });
 
-            if (!emailResponse.ok) {
-                console.error('Failed to send email:', await emailResponse.text());
-            } else {
-                console.log('Session code email sent successfully to:', extractedData.email);
+                if (!emailResponse.ok) {
+                    console.error(`Failed to send email to ${candidate.email}:`, await emailResponse.text());
+                } else {
+                    console.log(`✅ Session code sent to: ${candidate.email}`);
+                }
+            } catch (emailError) {
+                console.error(`Error sending email to ${candidate.email}:`, emailError);
             }
-        } catch (emailError) {
-            console.error('Error sending email:', emailError);
-            // Don't fail the whole request if email fails
-        }
+        });
+
+        // Wait for all emails to be sent
+        await Promise.all(emailPromises);
+        console.log(`✅ Sent session codes to ${candidates.length} candidate(s)`);
 
         return Response.json({ success: true }, { status: 200 });
     } catch (error) {

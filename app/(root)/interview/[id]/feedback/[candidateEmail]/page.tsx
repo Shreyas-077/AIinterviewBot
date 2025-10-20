@@ -1,66 +1,94 @@
-import dayjs from "dayjs";
-import Link from "next/link";
-import Image from "next/image";
+import { db } from "@/firebase/admin";
 import { redirect } from "next/navigation";
-
-import {
-  getFeedbackByInterviewId,
-  getInterviewById,
-} from "@/lib/actions/general.action";
+import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { getCurrentUser, getCurrentCandidateSession } from "@/lib/actions/auth.action";
+import dayjs from "dayjs";
 
-const Feedback = async ({ params }: RouteParams) => {
-  const { id } = await params;
-  
-  // Check if candidate is trying to access feedback
-  const candidateSession = await getCurrentCandidateSession();
-  
-  // Candidates should NOT see feedback - redirect them
-  if (candidateSession) {
-    redirect(`/interview/${id}`);
-  }
-  
-  const user = await getCurrentUser();
-  
-  // If no user at all, redirect to sign-in
-  if (!user) redirect('/sign-in');
+interface PageProps {
+  params: Promise<{
+    id: string;
+    candidateEmail: string;
+  }>;
+}
 
-  const interview = await getInterviewById(id);
-  if (!interview) redirect("/");
+export default async function CandidateFeedbackPage({ params }: PageProps) {
+  const resolvedParams = await params;
+  const { id: interviewId, candidateEmail } = resolvedParams;
+  
+  // Decode the email from URL
+  const decodedEmail = decodeURIComponent(candidateEmail);
 
-  // If interview has multiple candidates, redirect to candidates list
-  if (interview.candidates && interview.candidates.length > 1) {
-    redirect(`/interview/${id}/candidates`);
+  // Get interview details
+  const interviewDoc = await db.collection('interviews').doc(interviewId).get();
+  
+  if (!interviewDoc.exists) {
+    redirect('/');
   }
 
-  // If interview has single candidate (new format), redirect to their specific feedback
-  if (interview.candidates && interview.candidates.length === 1 && interview.candidates[0].email) {
-    redirect(`/interview/${id}/feedback/${encodeURIComponent(interview.candidates[0].email)}`);
+  const interview = interviewDoc.data();
+
+  // Get feedback for this specific candidate
+  const feedbackSnapshot = await db
+    .collection('feedback')
+    .where('interviewId', '==', interviewId)
+    .where('candidateEmail', '==', decodedEmail)
+    .limit(1)
+    .get();
+
+  if (feedbackSnapshot.empty) {
+    return (
+      <section className="section-feedback">
+        <div className="flex flex-col items-center gap-4 text-center py-12">
+          <h1 className="text-3xl font-bold">No Feedback Available</h1>
+          <p className="text-muted-foreground mb-6">
+            This candidate hasn't completed the interview yet.
+          </p>
+          <Button className="btn-secondary">
+            <Link href={`/interview/${interviewId}/candidates`}>
+              Back to Candidates List
+            </Link>
+          </Button>
+        </div>
+      </section>
+    );
   }
 
-  // Legacy format - get feedback normally (backward compatibility)
-  const feedback = await getFeedbackByInterviewId({
-    interviewId: id,
-    userId: user.id,
-  });
+  const feedbackDoc = feedbackSnapshot.docs[0];
+  const feedback = feedbackDoc.data();
 
-  console.log('Feedback page - Interview ID:', id);
-  console.log('Feedback page - User ID:', user.id);
-  console.log('Feedback page - Feedback found:', !!feedback);
-  console.log('Feedback page - Transcript exists:', !!feedback?.transcript);
-  console.log('Feedback page - Transcript length:', feedback?.transcript?.length || 0);
+  // Find candidate details
+  const candidate = interview?.candidates?.find(
+    (c: any) => c.email === decodedEmail
+  );
 
   return (
     <section className="section-feedback">
+      {/* Header */}
       <div className="flex flex-row justify-center">
         <h1 className="text-4xl font-semibold">
           Feedback on the Interview -{" "}
-          <span className="capitalize">{interview.role}</span> Interview
+          <span className="capitalize">{interview?.role}</span> Interview
         </h1>
       </div>
 
-      <div className="flex flex-row justify-center ">
+      {/* Candidate Info Badge */}
+      <div className="flex flex-row justify-center mb-4">
+        <div className="flex items-center gap-3 bg-primary/10 px-6 py-3 rounded-full border border-primary/20">
+          <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-white text-lg font-bold">
+            {decodedEmail[0].toUpperCase()}
+          </div>
+          <div className="text-left">
+            <p className="font-semibold text-sm">{decodedEmail}</p>
+            <p className="text-xs text-muted-foreground">
+              Session: {candidate?.sessionCode || 'N/A'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div className="flex flex-row justify-center">
         <div className="flex flex-row gap-5">
           {/* Overall Impression */}
           <div className="flex flex-row gap-2 items-center">
@@ -68,7 +96,7 @@ const Feedback = async ({ params }: RouteParams) => {
             <p>
               Overall Impression:{" "}
               <span className="text-primary-200 font-bold">
-                {feedback?.totalScore}
+                {feedback?.totalScore || 'N/A'}
               </span>
               /100
             </p>
@@ -78,7 +106,9 @@ const Feedback = async ({ params }: RouteParams) => {
           <div className="flex flex-row gap-2">
             <Image src="/calendar.svg" width={22} height={22} alt="calendar" />
             <p>
-              {feedback?.createdAt
+              {candidate?.completedAt
+                ? dayjs(candidate.completedAt).format("MMM D, YYYY h:mm A")
+                : feedback?.createdAt
                 ? dayjs(feedback.createdAt).format("MMM D, YYYY h:mm A")
                 : "N/A"}
             </p>
@@ -88,7 +118,7 @@ const Feedback = async ({ params }: RouteParams) => {
 
       <hr />
 
-      {/* Transcript Section - Show this FIRST and ALWAYS if it exists */}
+      {/* Transcript Section - Show this FIRST */}
       {feedback?.transcript && Array.isArray(feedback.transcript) && feedback.transcript.length > 0 ? (
         <div className="card-border mt-8 mb-8">
           <div className="card p-6">
@@ -99,7 +129,7 @@ const Feedback = async ({ params }: RouteParams) => {
               Interview Transcript ({feedback.transcript.length} messages)
             </h2>
             <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-              {feedback.transcript.map((message, index) => (
+              {feedback.transcript.map((message: any, index: number) => (
                 <div
                   key={index}
                   className={`flex ${
@@ -155,61 +185,81 @@ const Feedback = async ({ params }: RouteParams) => {
 
       {/* AI Assessment */}
       <h2 className="text-2xl font-bold mb-4">AI Assessment</h2>
-      <p className="mb-6">{feedback?.finalAssessment}</p>
+      <p className="mb-6">{feedback?.finalAssessment || 'No assessment available.'}</p>
 
       {/* Interview Breakdown */}
       <div className="flex flex-col gap-4">
         <h2>Breakdown of the Interview:</h2>
-        {feedback?.categoryScores?.map((category, index) => (
-          <div key={index}>
-            <p className="font-bold">
-              {index + 1}. {category.name} ({category.score}/100)
-            </p>
-            <p>{category.comment}</p>
-          </div>
-        ))}
+        {feedback?.categoryScores && Array.isArray(feedback.categoryScores) ? (
+          feedback.categoryScores.map((category: any, index: number) => (
+            <div key={index}>
+              <p className="font-bold">
+                {index + 1}. {category.name} ({category.score}/100)
+              </p>
+              <p>{category.comment}</p>
+            </div>
+          ))
+        ) : feedback?.categoryScores && typeof feedback.categoryScores === 'object' ? (
+          // Handle object format (fallback case)
+          Object.entries(feedback.categoryScores).map(([key, value], index) => (
+            <div key={index}>
+              <p className="font-bold">
+                {index + 1}. {key.replace(/([A-Z])/g, ' $1').trim().replace(/^./, str => str.toUpperCase())} ({value as number}/100)
+              </p>
+              <p>Score based on interview responses</p>
+            </div>
+          ))
+        ) : (
+          <p className="text-gray-500">No category scores available.</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-3">
         <h3>Strengths</h3>
         <ul>
-          {feedback?.strengths?.map((strength, index) => (
-            <li key={index}>{strength}</li>
-          ))}
+          {feedback?.strengths && Array.isArray(feedback.strengths) && feedback.strengths.length > 0 ? (
+            feedback.strengths.map((strength: string, index: number) => (
+              <li key={index}>{strength}</li>
+            ))
+          ) : (
+            <li className="text-gray-500">No strengths recorded.</li>
+          )}
         </ul>
       </div>
 
       <div className="flex flex-col gap-3">
         <h3>Areas for Improvement</h3>
         <ul>
-          {feedback?.areasForImprovement?.map((area, index) => (
-            <li key={index}>{area}</li>
-          ))}
+          {feedback?.areasForImprovement && Array.isArray(feedback.areasForImprovement) && feedback.areasForImprovement.length > 0 ? (
+            feedback.areasForImprovement.map((area: string, index: number) => (
+              <li key={index}>{area}</li>
+            ))
+          ) : (
+            <li className="text-gray-500">No areas for improvement recorded.</li>
+          )}
         </ul>
       </div>
 
       <div className="buttons">
         <Button className="btn-secondary flex-1">
-          <Link href="/" className="flex w-full justify-center">
+          <Link href={`/interview/${interviewId}/candidates`} className="flex w-full justify-center">
             <p className="text-sm font-semibold text-primary-200 text-center">
-              Back to dashboard
+              Back to Candidates List
             </p>
           </Link>
         </Button>
 
         <Button className="btn-primary flex-1">
           <Link
-            href={`/interview/${id}`}
+            href="/"
             className="flex w-full justify-center"
           >
-            <p className="text-sm font-semibold text-black text-center">
-              Retake Interview
+            <p className="text-sm font-semibold text-white text-center">
+              Back to Dashboard
             </p>
           </Link>
         </Button>
       </div>
     </section>
   );
-};
-
-export default Feedback;
+}

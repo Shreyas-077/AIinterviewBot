@@ -13,7 +13,7 @@ interface FormFieldProps<T extends FieldValues>{
     
 }
 
-const FormField = ( {control, name, label, placeholder, type='text'
+const FormField = <T extends FieldValues>( {control, name, label, placeholder, type='text'
 
 }: FormFieldProps<T>) => (
    

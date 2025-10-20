@@ -52,11 +52,12 @@ export async function getInterviewById(id: string): Promise<Interview | null> {
 }
 
 export async function createFeedback(params: CreateFeedbackParams) {
-  const { interviewId, userId, transcript, feedbackId } = params;
+  const { interviewId, userId, transcript, feedbackId, candidateEmail } = params;
 
   console.log('=== createFeedback called ===');
   console.log('Interview ID:', interviewId);
   console.log('User ID:', userId);
+  console.log('Candidate Email:', candidateEmail);
   console.log('Transcript length:', transcript?.length);
   console.log('Feedback ID:', feedbackId);
 
@@ -77,37 +78,86 @@ export async function createFeedback(params: CreateFeedbackParams) {
 
     console.log('Formatted transcript for AI:', formattedTranscript);
 
-    const { object } = await generateObject({
-      model: google("gemini-2.0-flash-001", {
-        structuredOutputs: false,
-      }),
-      schema: feedbackSchema,
-      prompt: `
-        You are an AI interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories. Be thorough and detailed in your analysis. Don't be lenient with the candidate. If there are mistakes or areas for improvement, point them out.
-        
-        IMPORTANT: This interview may be partial (not all questions answered). Evaluate based ONLY on what was discussed.
-        
-        Transcript:
-        ${formattedTranscript}
+    // Check if transcript is too short (meeting ended prematurely)
+    if (transcript.length < 3) {
+      console.log('⚠️ Transcript too short - interview ended prematurely');
+      throw new Error('Interview ended too early. Please ensure you complete the interview before ending the call.');
+    }
 
-        Please score the candidate from 0 to 100 in the following areas based on the responses provided. If a category wasn't covered in the conversation, score it as 30 (below average due to incomplete interview). Do not add categories other than the ones provided:
-        - **Communication Skills**: Clarity, articulation, structured responses.
-        - **Technical Knowledge**: Understanding of key concepts for the role.
-        - **Problem-Solving**: Ability to analyze problems and propose solutions.
-        - **Cultural & Role Fit**: Alignment with company values and job role.
-        - **Confidence & Clarity**: Confidence in responses, engagement, and clarity.
-        
-        If the interview was incomplete (very few responses), mention this in your assessment.
-        `,
-      system:
-        "You are a professional interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories",
-    });
+    let object;
+    try {
+      const result = await generateObject({
+        model: google("gemini-2.5-flash-002", {
+          structuredOutputs: false,
+        }),
+        schema: feedbackSchema,
+        prompt: `
+          You are an AI interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories. Be thorough and detailed in your analysis. Don't be lenient with the candidate. If there are mistakes or areas for improvement, point them out.
+          
+          IMPORTANT: This interview may be partial (not all questions answered). Evaluate based ONLY on what was discussed.
+          
+          Transcript:
+          ${formattedTranscript}
+
+          Please score the candidate from 0 to 100 in the following areas based on the responses provided. If a category wasn't covered in the conversation, score it as 30 (below average due to incomplete interview). Do not add categories other than the ones provided:
+          - **Communication Skills**: Clarity, articulation, structured responses.
+          - **Technical Knowledge**: Understanding of key concepts for the role.
+          - **Problem-Solving**: Ability to analyze problems and propose solutions.
+          - **Cultural & Role Fit**: Alignment with company values and job role.
+          - **Confidence & Clarity**: Confidence in responses, engagement, and clarity.
+          
+          If the interview was incomplete (very few responses), mention this in your assessment.
+          `,
+        system:
+          "You are a professional interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories",
+      });
+      object = result.object;
+    } catch (aiError: any) {
+      console.error('❌ AI generation failed:', aiError.message);
+      console.log('Creating fallback feedback due to AI error...');
+      
+      // Create a basic fallback feedback if AI fails - using correct array format
+      object = {
+        totalScore: 40,
+        categoryScores: [
+          {
+            name: "Communication Skills",
+            score: 40,
+            comment: "Interview was too short for proper evaluation."
+          },
+          {
+            name: "Technical Knowledge",
+            score: 40,
+            comment: "Not enough technical discussion to assess."
+          },
+          {
+            name: "Problem Solving",
+            score: 40,
+            comment: "Insufficient responses to evaluate problem-solving ability."
+          },
+          {
+            name: "Cultural Fit",
+            score: 40,
+            comment: "Limited interaction to determine cultural alignment."
+          },
+          {
+            name: "Confidence and Clarity",
+            score: 40,
+            comment: "Not enough data to assess confidence level."
+          }
+        ],
+        strengths: ["Participated in the interview"],
+        areasForImprovement: ["Interview was incomplete or too short for proper analysis", "Please ensure to complete the full interview for accurate feedback"],
+        finalAssessment: "The interview ended prematurely or was too short for a detailed analysis. The AI could not generate a complete assessment. Please ensure candidates complete the full interview for accurate feedback."
+      };
+    }
 
     console.log('✅ AI feedback generated:', object);
 
     const feedback = {
       interviewId: interviewId,
       userId: userId,
+      candidateEmail: candidateEmail || 'unknown', // Track which candidate
       totalScore: object.totalScore,
       categoryScores: object.categoryScores,
       strengths: object.strengths,
@@ -136,13 +186,44 @@ export async function createFeedback(params: CreateFeedbackParams) {
     await feedbackRef.set(feedback);
     console.log('✅ Feedback saved to Firestore');
 
-    // Mark interview as completed
-    console.log('Marking interview as completed...');
-    await db.collection("interviews").doc(interviewId).update({
-      completed: true,
-      completedAt: new Date().toISOString(),
-    });
-    console.log('✅ Interview marked as completed');
+    // Mark THIS candidate as completed in the interview
+    if (candidateEmail) {
+      console.log('Marking candidate as completed:', candidateEmail);
+      const interviewRef = db.collection("interviews").doc(interviewId);
+      const interviewDoc = await interviewRef.get();
+      const interviewData = interviewDoc.data();
+      
+      if (interviewData && interviewData.candidates && Array.isArray(interviewData.candidates)) {
+        // Update candidates array - mark this candidate as completed
+        const updatedCandidates = interviewData.candidates.map((c: CandidateSession) => {
+          if (c.email === candidateEmail) {
+            return {
+              ...c,
+              completed: true,
+              completedAt: new Date().toISOString()
+            };
+          }
+          return c;
+        });
+        
+        await interviewRef.update({ candidates: updatedCandidates });
+        console.log('✅ Candidate marked as completed');
+      } else {
+        // Legacy format - mark interview as completed
+        await interviewRef.update({
+          completed: true,
+          completedAt: new Date().toISOString(),
+        });
+        console.log('✅ Interview marked as completed (legacy)');
+      }
+    } else {
+      // No candidate email (HR taking interview) - mark whole interview as completed
+      await db.collection("interviews").doc(interviewId).update({
+        completed: true,
+        completedAt: new Date().toISOString(),
+      });
+      console.log('✅ Interview marked as completed');
+    }
 
     console.log('=== createFeedback SUCCESS ===');
     return { success: true, feedbackId: feedbackRef.id };

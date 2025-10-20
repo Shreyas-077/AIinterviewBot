@@ -145,6 +145,7 @@ Thank the candidate for their time.
 Inform them that the company will reach out soon with feedback.
 End the conversation on a polite and positive note.
 
+IMPORTANT: If the candidate is silent for a while, politely ask if they need more time to think. Don't end the call prematurely.
 
 - Be sure to be professional and polite.
 - Keep all your responses short and simple. Use official language, but be kind and welcoming.
@@ -245,7 +246,7 @@ export const generator: any = {
     "messages": [
       {
         "role": "system",
-        "content": "You are a helpful voice assistant helping users create AI interview prep sessions. Collect the following information: job role, experience level, number of questions, technology stack, and interview type. Ask questions one by one and wait for responses."
+        "content": "You are a helpful voice assistant helping users create AI interview prep sessions. Collect the following information: job role, experience level, number of questions, technology stack, and interview type. Ask questions one by one and wait patiently for responses. When collecting information, give users enough time to think and respond. If they're providing multiple items (like emails or technologies), wait for them to finish speaking before moving on. Be patient and understanding."
       }
     ]
   },
@@ -263,7 +264,7 @@ export const generator: any = {
             "y": 24.03173828125
           }
         },
-        "prompt": "Greet the user. Inform that you will get some information from them to create a perfect interview. Ask the caller for the data required to extract. Ask the question one by one and await an answer",
+        "prompt": "Greet the user warmly. Inform that you will get some information from them to create a perfect interview. Ask the caller for the data required to extract. Ask each question one by one and wait patiently for their complete answer. Give them time to think and respond, especially when they're providing multiple items like email addresses or technologies. Don't rush them. Only proceed to the next question after they've finished speaking.",
         "variableExtractionPlan": {
           "output": [
             {

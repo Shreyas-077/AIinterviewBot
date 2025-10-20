@@ -62,18 +62,41 @@ const AuthForm = ( {type}: {type: FormType }) => {
       const { name, email, password } = values;
       
       if(type === 'sign-in') {
-        const userCredential = await signInWithEmailAndPassword(
-          firebaseAuth,
-          email,
-          password
-        );
+        // First, try HR user login (Firestore credentials)
+        const hrResult = await signIn({ email, password });
 
-        const idToken = await userCredential.user.getIdToken();
+        if (hrResult?.success) {
+          toast.success('Signed in successfully!');
+          router.push('/');
+          return;
+        }
 
-        await signIn({ email, idToken });
+        // If HR login failed, try Firebase Authentication (regular users)
+        try {
+          const userCredential = await signInWithEmailAndPassword(
+            firebaseAuth,
+            email,
+            password
+          );
 
-        toast.success('Signed in successfully!');
-        router.push('/');
+          const idToken = await userCredential.user.getIdToken();
+
+          await signIn({ email, idToken });
+
+          toast.success('Signed in successfully!');
+          router.push('/');
+        } catch (firebaseError: any) {
+          console.error('Firebase auth error:', firebaseError);
+          
+          // Show appropriate error message
+          if (firebaseError.code === 'auth/invalid-credential' || 
+              firebaseError.code === 'auth/user-not-found' ||
+              firebaseError.code === 'auth/wrong-password') {
+            toast.error(hrResult?.message || 'Invalid email or password');
+          } else {
+            toast.error('Failed to sign in. Please try again.');
+          }
+        }
       } else {
         const userCredential = await createUserWithEmailAndPassword(
           firebaseAuth,
@@ -207,13 +230,6 @@ const AuthForm = ( {type}: {type: FormType }) => {
                     </Button>
                   </form>
                 </Form>
-
-                <p className="text-center text-sm">
-                  {type === 'sign-in' ? "Don't have an account? " : "Have an account already? "}
-                  <Link href={type === 'sign-in' ? '/sign-up' : '/sign-in'} className="text-primary-100 underline">
-                    {type === 'sign-in' ? 'Sign up' : 'Sign in'}
-                  </Link>
-                </p>
               </>
             )}
 

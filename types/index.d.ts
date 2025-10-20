@@ -1,6 +1,7 @@
 interface Feedback {
   id: string;
   interviewId: string;
+  candidateEmail: string; // NEW: Track which candidate this feedback is for
   totalScore: number;
   categoryScores: Array<{
     name: string;
@@ -17,6 +18,13 @@ interface Feedback {
   }>;
 }
 
+interface CandidateSession {
+  email: string;
+  sessionCode: string;
+  completed: boolean;
+  completedAt?: string;
+}
+
 interface Interview {
   id: string;
   role: string;
@@ -27,10 +35,12 @@ interface Interview {
   userId: string;
   type: string;
   finalized: boolean;
+  candidates?: CandidateSession[]; // NEW: Array of candidates with their session codes
+  // Legacy fields (keep for backward compatibility)
   email?: string;
   sessionCode?: string;
-  completed?: boolean; // Track if interview is completed
-  completedAt?: string; // When it was completed
+  completed?: boolean;
+  completedAt?: string;
 }
 
 interface CreateFeedbackParams {
@@ -38,12 +48,22 @@ interface CreateFeedbackParams {
   userId: string;
   transcript: { role: string; content: string }[];
   feedbackId?: string;
+  candidateEmail?: string; // NEW: Track which candidate this feedback is for
 }
 
 interface User {
   name: string;
   email: string;
   id: string;
+}
+
+interface HRUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
 }
 
 interface InterviewCardProps {
@@ -65,6 +85,7 @@ interface AgentProps {
   type: "generate" | "interview";
   questions?: string[];
   hrUserId?: string; // The HR user ID who created the interview (for candidates)
+  candidateEmail?: string; // The candidate's email for tracking feedback
 }
 
 interface RouteParams {
@@ -84,7 +105,8 @@ interface GetLatestInterviewsParams {
 
 interface SignInParams {
   email: string;
-  idToken: string;
+  idToken?: string;
+  password?: string;
 }
 
 interface SignUpParams {

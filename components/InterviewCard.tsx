@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import Link from 'next/link';
 import DisplayTechIcons from './DisplayTechIcons';
 import { getFeedbackByInterviewId } from '@/lib/actions/general.action';
+import { hasMultipleCandidates } from '@/lib/actions/feedback.action';
 import DeleteInterviewButton from './DeleteInterviewButton';
 
 
@@ -17,6 +18,10 @@ const InterviewCard = async ({ id, userId, role, type, techstack, createdAt, sho
           userId,
         })
       : null;
+      
+      // Check if this interview has multiple candidates
+      const multipleCandidates = id ? await hasMultipleCandidates(id) : false;
+      
         const normalizedType = /mix/gi.test(type)? 'Mixed' : type;
         const formattedDate = dayjs(feedback?.createdAt || createdAt ||
              Date.now()).format('MMM D, YYYY');
@@ -60,7 +65,9 @@ const InterviewCard = async ({ id, userId, role, type, techstack, createdAt, sho
                     <Button className='btn-primary'>
                         <Link href={
                             completed || feedback
-                                ? `/interview/${id}/feedback`
+                                ? multipleCandidates 
+                                    ? `/interview/${id}/candidates`  // Multiple candidates - show list
+                                    : `/interview/${id}/feedback`     // Single candidate - direct feedback
                                 : `/interview/${id}`
                         }>
                             {completed || feedback ? 'View Feedback' : 'View Interview'}

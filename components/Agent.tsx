@@ -23,7 +23,7 @@ interface SavedMessage{
     content: string;
 }
 
-const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: AgentProps) => {
+const Agent = ({userName, userId, type, interviewId, questions, hrUserId, candidateEmail}: AgentProps) => {
     const router = useRouter();
 
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -63,9 +63,11 @@ const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: Agent
       }
       
       // Check if AI said goodbye - auto end call after 3 seconds
-      if (message.role === "assistant" && 
+      // Only auto-end if we have enough messages (prevent premature endings)
+      if (message.role === "assistant" && messages.length >= 5 &&
           (message.transcript.toLowerCase().includes("goodbye") || 
-           message.transcript.toLowerCase().includes("good luck"))) {
+           message.transcript.toLowerCase().includes("good luck") ||
+           message.transcript.toLowerCase().includes("thank you for your time"))) {
         console.log("AI said goodbye, ending call in 3 seconds...");
         setShouldAutoEnd(true);
         setTimeout(() => {
@@ -78,7 +80,11 @@ const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: Agent
 
   const onSpeechStart = () => setIsSpeaking(true);
   const onSpeechEnd = () => setIsSpeaking(false);
-  const onError = (error: Error) => console.log("Error", error);
+  const onError = (error: Error) => {
+    console.error("❌ Vapi Error:", error);
+    // Don't auto-end on errors - let user manually end if needed
+    // This prevents premature meeting endings
+  };
 
   // 📞 Register Vapi event listeners
   vapi.on("call-start", onCallStart);
@@ -103,6 +109,18 @@ const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: Agent
         console.log ('Generate feedback here')
         console.log('Total messages:', messages.length);
         console.log('Messages array:', JSON.stringify(messages, null, 2));
+
+        // Check if interview is too short (less than 3 messages means likely incomplete)
+        if (messages.length < 3) {
+            console.error('❌ Interview too short - not enough conversation');
+            alert('The interview ended too early. Please ensure you answer at least a few questions before ending the call.');
+            if (isCandidate) {
+                setShowCandidateEndMessage(false);
+            } else {
+                router.push('/');
+            }
+            return;
+        }
 
         // If candidate, create feedback and mark as complete regardless of how many questions answered
         if (isCandidate) {
@@ -131,6 +149,7 @@ const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: Agent
                 interviewId: interviewId!,
                 userId: feedbackUserId!, // Use HR user ID so HR can retrieve it
                 transcript: messages,
+                candidateEmail: candidateEmail, // Track which candidate this feedback is for
             });
             
             console.log('Feedback creation result:', result);
@@ -140,25 +159,30 @@ const Agent = ({userName, userId, type, interviewId, questions, hrUserId}: Agent
                 setShowCandidateEndMessage(true);
             } else {
                 console.error('❌ Failed to create feedback');
-                alert('Failed to save interview. Please try again.');
+                alert('Failed to save interview feedback. The interview may have been too short or incomplete.');
             }
             return;
         }
 
         // HR is taking their own interview
-        const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId!,
-        userId: feedbackUserId!,
-        transcript: messages,
-        
-      });
+        try {
+            const { success, feedbackId: id } = await createFeedback({
+                interviewId: interviewId!,
+                userId: feedbackUserId!,
+                transcript: messages,
+            });
 
-
-        if(success && id){
-            router.push(`/interview/${interviewId}/feedback`)
-        } else {
-            console.log('Error saving feedback')
-            router.push('/')
+            if(success && id){
+                router.push(`/interview/${interviewId}/feedback`)
+            } else {
+                console.log('Error saving feedback')
+                alert('Failed to save interview feedback. Please ensure you completed at least a few questions.');
+                router.push('/')
+            }
+        } catch (error) {
+            console.error('❌ Error in handleGenerateFeedback:', error);
+            alert('An error occurred while saving feedback. Please try again.');
+            router.push('/');
         }
     }
   
@@ -269,7 +293,7 @@ Your job:
    a) "What role are you preparing for?" 
       (Get answer like: Frontend Developer, Backend Engineer, Full Stack, etc.)
    
-   b) "What's your experience level?"
+   b) "What's the experience level for the job role?"
       (Get answer like: Junior, Mid-level, or Senior)
    
    c) "What technologies do you want to focus on?"
@@ -281,15 +305,15 @@ Your job:
    e) "How many questions would you like?"
       (Get a number like: 5, 10, or 15)
    
-   f) "What's your email address? We'll send you the session code to access your interview."
-      (Get a valid email address like: user@example.com)
+   f) "Please provide the email addresses of candidates who will take this interview. You can provide multiple emails separated by commas."
+      (Get emails like: candidate1@example.com, candidate2@example.com, candidate3@example.com)
 
 2. After collecting ALL 6 answers clearly, say:
-   "Perfect! I have all the information I need. Your personalized interview prep session will be ready in just a moment. We'll send the session code to your email shortly. Thank you ${userName}, and good luck with your preparation! Goodbye!"
+   "Perfect! I have all the information I need. Your personalized interview prep session will be ready in just a moment. We'll send unique session codes to each candidate's email shortly. Thank you ${userName}, and good luck! Goodbye!"
 
 3. IMPORTANT: After saying goodbye, IMMEDIATELY say "endCall" to end the conversation.
 
-Be conversational, patient, and make sure you get clear answers for each question. Once you have all 6 answers, deliver your final message and say "endCall".`,
+Be conversational, patient, and make sure you get clear answers for each question. For the email question, accept both single and multiple emails. Once you have all 6 answers, deliver your final message and say "endCall".`,
               },
             ],
           },

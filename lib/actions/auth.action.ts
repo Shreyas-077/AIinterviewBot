@@ -48,9 +48,82 @@ export async function  signUp(params:SignUpParams) {
 
 
 export async function signIn(params:SignInParams) {
-    const{ email, idToken} = params;
+    const{ email, idToken, password} = params;
 
     try {
+        // First, check if this is an HR user (Firestore credentials)
+        const hrUsersQuery = await db.collection('users')
+            .where('email', '==', email)
+            .where('role', '==', 'hr')
+            .limit(1)
+            .get();
+
+        if (!hrUsersQuery.empty) {
+            // This is an HR user - validate with Firestore credentials
+            const hrUser = hrUsersQuery.docs[0];
+            const userId = hrUser.id;
+            const userData = hrUser.data();
+
+            // Check if user is active
+            if (!userData.isActive) {
+                return {
+                    success: false,
+                    message: 'Your account has been deactivated. Please contact admin.'
+                };
+            }
+
+            // Get credentials from user-credentials collection
+            const credDoc = await db.collection('user-credentials').doc(userId).get();
+            
+            if (!credDoc.exists) {
+                return {
+                    success: false,
+                    message: 'Invalid credentials'
+                };
+            }
+
+            const credentials = credDoc.data();
+            
+            // Validate password (in production, use bcrypt comparison)
+            if (credentials?.password !== password) {
+                return {
+                    success: false,
+                    message: 'Invalid email or password'
+                };
+            }
+
+            // Create session for HR user
+            const cookieStore = await cookies();
+            cookieStore.set('hr-session', JSON.stringify({
+                userId,
+                email: userData.email,
+                name: userData.name,
+                role: 'hr'
+            }), {
+                maxAge: ONE_WEEK,
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                path: '/',
+                sameSite: 'lax'
+            });
+
+            // Clear any existing candidate session
+            cookieStore.delete('candidate-session');
+
+            return {
+                success: true,
+                message: 'Logged in successfully'
+            };
+        }
+
+        // Not an HR user - use Firebase Authentication (regular users)
+        if (!idToken) {
+            return {
+                success: false,
+                message: 'Invalid credentials'
+            };
+        }
+
         const userRecord = await auth.getUserByEmail(email);
 
         if(!userRecord){
@@ -65,6 +138,11 @@ export async function signIn(params:SignInParams) {
         // Clear any existing candidate session when regular user logs in
         const cookieStore = await cookies();
         cookieStore.delete('candidate-session');
+
+        return {
+            success: true,
+            message: 'Logged in successfully'
+        };
 
     } catch (e) {
         console.log(e);
@@ -97,6 +175,39 @@ export async function setSessionCookie(idToken: string) {
 export async function getCurrentUser(): Promise<User | null> {
     const cookieStore = await cookies();
 
+    // First check for HR session
+    const hrSessionCookie = cookieStore.get('hr-session')?.value;
+    
+    if (hrSessionCookie) {
+        try {
+            const hrSession = JSON.parse(hrSessionCookie);
+            
+            // Verify the HR user still exists and is active
+            const userDoc = await db.collection('users').doc(hrSession.userId).get();
+            
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                
+                // Check if user is still active
+                if (userData?.isActive === false) {
+                    // User deactivated - clear session
+                    cookieStore.delete('hr-session');
+                    return null;
+                }
+                
+                return {
+                    id: hrSession.userId,
+                    name: hrSession.name,
+                    email: hrSession.email
+                } as User;
+            }
+        } catch (e) {
+            console.error('Error parsing HR session:', e);
+            cookieStore.delete('hr-session');
+        }
+    }
+
+    // Check for regular Firebase Auth session
     const sessionCookie = cookieStore.get('session')?.value;
 
     if(!sessionCookie) return null;
@@ -139,6 +250,7 @@ export async function signOut() {
     try {
         const cookieStore = await cookies();
         cookieStore.delete('session');
+        cookieStore.delete('hr-session'); // Also clear HR session
         
         return {
             success: true,
@@ -159,30 +271,52 @@ export async function signInWithSession(params: { email: string; sessionCode: st
     const { email, sessionCode } = params;
     
     try {
-        // Find interview with matching email and session code
+        // Find interview with matching candidate
         const interviewsSnapshot = await db
             .collection('interviews')
-            .where('email', '==', email)
-            .where('sessionCode', '==', sessionCode.toUpperCase())
-            .limit(1)
+            .where('finalized', '==', true)
             .get();
 
-        if (interviewsSnapshot.empty) {
+        let matchedInterview = null;
+        let matchedCandidate = null;
+
+        // Check each interview for matching candidate
+        for (const doc of interviewsSnapshot.docs) {
+            const interviewData = doc.data();
+            
+            // Check new format (candidates array)
+            if (interviewData.candidates && Array.isArray(interviewData.candidates)) {
+                const candidate = interviewData.candidates.find(
+                    (c: any) => c.email === email && c.sessionCode === sessionCode.toUpperCase()
+                );
+                if (candidate) {
+                    matchedInterview = { id: doc.id, ...interviewData };
+                    matchedCandidate = candidate;
+                    break;
+                }
+            }
+            
+            // Check legacy format (backward compatibility)
+            if (interviewData.email === email && interviewData.sessionCode === sessionCode.toUpperCase()) {
+                matchedInterview = { id: doc.id, ...interviewData };
+                matchedCandidate = { email: interviewData.email, sessionCode: interviewData.sessionCode };
+                break;
+            }
+        }
+
+        if (!matchedInterview) {
             return {
                 success: false,
                 message: 'Invalid email or session code'
             };
         }
 
-        const interview = interviewsSnapshot.docs[0];
-        const interviewData = interview.data();
-
         // Store session info in cookie
         const cookieStore = await cookies();
         cookieStore.set('candidate-session', JSON.stringify({
             email,
             sessionCode,
-            interviewId: interview.id,
+            interviewId: matchedInterview.id,
             timestamp: new Date().toISOString()
         }), {
             maxAge: ONE_WEEK,
@@ -194,7 +328,7 @@ export async function signInWithSession(params: { email: string; sessionCode: st
 
         return {
             success: true,
-            interviewId: interview.id,
+            interviewId: matchedInterview.id,
             message: 'Session validated successfully'
         };
     } catch (e) {

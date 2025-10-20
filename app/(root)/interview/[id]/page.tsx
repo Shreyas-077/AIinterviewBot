@@ -27,13 +27,30 @@ const page = async ( {params}: RouteParams ) => {
             redirect(`/interview/${candidateSession.interviewId}`)
         }
         
-        // CRITICAL: Verify email matches the one that received the session code
-        if (interview.email !== candidateSession.email) {
-            redirect('/sign-in')
+        // CRITICAL: Verify email matches a candidate in this interview
+        let candidateData = null;
+        
+        // Check new format (candidates array)
+        if (interview.candidates && Array.isArray(interview.candidates)) {
+            candidateData = interview.candidates.find(
+                (c: CandidateSession) => c.email === candidateSession.email && c.sessionCode === candidateSession.sessionCode
+            );
+        }
+        // Check legacy format
+        else if (interview.email === candidateSession.email && interview.sessionCode === candidateSession.sessionCode) {
+            candidateData = {
+                email: interview.email,
+                sessionCode: interview.sessionCode,
+                completed: interview.completed || false
+            };
         }
         
-        // Check if interview is already completed
-        if (interview.completed) {
+        if (!candidateData) {
+            redirect('/sign-in');
+        }
+        
+        // Check if THIS candidate already completed the interview
+        if (candidateData.completed) {
             return <InterviewCompletedMessage />
         }
         
@@ -73,6 +90,7 @@ const page = async ( {params}: RouteParams ) => {
     type = 'interview'
     questions={interview.questions}
     hrUserId={interview.userId} // Pass the HR user ID who created the interview
+    candidateEmail={candidateSession?.email} // Pass candidate email for tracking
     />
     </>
   )
