@@ -69,108 +69,147 @@ export async function createFeedback(params: CreateFeedbackParams) {
 
     console.log('Full transcript:', JSON.stringify(transcript, null, 2));
 
+    // Count actual user responses (not just messages)
+    const userResponses = transcript.filter((msg: { role: string }) => msg.role === 'user').length;
+    const assistantMessages = transcript.filter((msg: { role: string }) => msg.role === 'assistant').length;
+    
+    console.log('User responses:', userResponses);
+    console.log('Assistant messages:', assistantMessages);
+
+    // Require at least 3 meaningful exchanges (user answered at least 3 questions)
+    if (userResponses < 3) {
+      console.log('❌ Interview too short - not enough user responses');
+      return { 
+        success: false, 
+        error: 'Interview ended too early. Please answer at least 3 questions before ending the call.' 
+      };
+    }
+
     const formattedTranscript = transcript
       .map(
         (sentence: { role: string; content: string }) =>
-          `- ${sentence.role}: ${sentence.content}\n`
+          `${sentence.role.toUpperCase()}: ${sentence.content}`
       )
-      .join("");
+      .join("\n\n");
 
-    console.log('Formatted transcript for AI:', formattedTranscript);
-
-    // Check if transcript is too short (meeting ended prematurely)
-    if (transcript.length < 3) {
-      console.log('⚠️ Transcript too short - interview ended prematurely');
-      throw new Error('Interview ended too early. Please ensure you complete the interview before ending the call.');
-    }
+    console.log('Formatted transcript for AI (first 500 chars):', formattedTranscript.substring(0, 500));
 
     let object;
     try {
       const result = await generateObject({
-        model: google("gemini-2.5-flash-002", {
+        model: google("gemini-2.0-flash-exp", {
           structuredOutputs: false,
         }),
         schema: feedbackSchema,
-        prompt: `
-          You are an AI interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories. Be thorough and detailed in your analysis. Don't be lenient with the candidate. If there are mistakes or areas for improvement, point them out.
-          
-          IMPORTANT: This interview may be partial (not all questions answered). Evaluate based ONLY on what was discussed.
-          
-          Transcript:
-          ${formattedTranscript}
+        prompt: `You are an expert AI interviewer analyzing a completed mock interview session. Your task is to provide detailed, constructive feedback.
 
-          Please score the candidate from 0 to 100 in the following areas based on the responses provided. If a category wasn't covered in the conversation, score it as 30 (below average due to incomplete interview). Do not add categories other than the ones provided:
-          - **Communication Skills**: Clarity, articulation, structured responses.
-          - **Technical Knowledge**: Understanding of key concepts for the role.
-          - **Problem-Solving**: Ability to analyze problems and propose solutions.
-          - **Cultural & Role Fit**: Alignment with company values and job role.
-          - **Confidence & Clarity**: Confidence in responses, engagement, and clarity.
-          
-          If the interview was incomplete (very few responses), mention this in your assessment.
-          `,
-        system:
-          "You are a professional interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories",
+INTERVIEW TRANSCRIPT:
+${formattedTranscript}
+
+EVALUATION CRITERIA:
+Please provide a comprehensive evaluation with scores from 0-100 for each category below. Be fair but thorough - give credit where deserved, but also identify genuine areas for improvement.
+
+1. **Communication Skills** (0-100)
+   - Clarity and articulation
+   - Structure of responses
+   - Professional language use
+   - Ability to explain complex concepts
+
+2. **Technical Knowledge** (0-100)
+   - Understanding of relevant technologies
+   - Depth of technical expertise
+   - Accuracy of technical explanations
+   - Problem-solving approach
+
+3. **Problem-Solving** (0-100)
+   - Analytical thinking
+   - Approach to challenges
+   - Creativity in solutions
+   - Logical reasoning
+
+4. **Cultural & Role Fit** (0-100)
+   - Alignment with role requirements
+   - Enthusiasm and motivation
+   - Team collaboration mindset
+   - Growth mindset
+
+5. **Confidence & Clarity** (0-100)
+   - Confidence in responses
+   - Clarity of thought
+   - Engagement level
+   - Handling of difficult questions
+
+INSTRUCTIONS:
+- Review the entire conversation carefully
+- Provide specific examples from the interview in your feedback
+- Calculate realistic scores based on actual performance
+- Identify 3-5 genuine strengths with examples
+- Suggest 3-5 specific areas for improvement
+- Provide an overall assessment summary
+
+Be constructive, specific, and helpful. Your goal is to help the candidate understand their performance and improve.`,
+        system: "You are an expert interview evaluator providing detailed, constructive feedback on mock interviews."
       });
       object = result.object;
+      console.log('✅ AI feedback generated successfully');
     } catch (aiError: any) {
-      console.error('❌ AI generation failed:', aiError.message);
-      console.log('Creating fallback feedback due to AI error...');
+      console.error('❌ AI generation failed:', aiError);
       
-      // Create a basic fallback feedback if AI fails - using correct array format
+      // Better fallback that indicates system error, not poor performance
       object = {
-        totalScore: 40,
+        totalScore: 0,
         categoryScores: [
           {
             name: "Communication Skills",
-            score: 40,
-            comment: "Interview was too short for proper evaluation."
+            score: 0,
+            comment: "Unable to evaluate - system error occurred."
           },
           {
-            name: "Technical Knowledge",
-            score: 40,
-            comment: "Not enough technical discussion to assess."
+            name: "Technical Knowledge", 
+            score: 0,
+            comment: "Unable to evaluate - system error occurred."
           },
           {
             name: "Problem Solving",
-            score: 40,
-            comment: "Insufficient responses to evaluate problem-solving ability."
+            score: 0,
+            comment: "Unable to evaluate - system error occurred."
           },
           {
             name: "Cultural Fit",
-            score: 40,
-            comment: "Limited interaction to determine cultural alignment."
+            score: 0,
+            comment: "Unable to evaluate - system error occurred."
           },
           {
             name: "Confidence and Clarity",
-            score: 40,
-            comment: "Not enough data to assess confidence level."
+            score: 0,
+            comment: "Unable to evaluate - system error occurred."
           }
         ],
-        strengths: ["Participated in the interview"],
-        areasForImprovement: ["Interview was incomplete or too short for proper analysis", "Please ensure to complete the full interview for accurate feedback"],
-        finalAssessment: "The interview ended prematurely or was too short for a detailed analysis. The AI could not generate a complete assessment. Please ensure candidates complete the full interview for accurate feedback."
+        strengths: ["Interview was completed"],
+        areasForImprovement: ["System error prevented feedback generation", "Please contact support or retry the interview"],
+        finalAssessment: "A technical error occurred while generating your feedback. Your interview responses were recorded but could not be analyzed. Please contact support or try taking the interview again."
       };
     }
 
-    console.log('✅ AI feedback generated:', object);
+    console.log('Feedback scores:', {
+      total: object.totalScore,
+      categories: object.categoryScores.map((c: any) => `${c.name}: ${c.score}`)
+    });
 
     const feedback = {
       interviewId: interviewId,
       userId: userId,
-      candidateEmail: candidateEmail || 'unknown', // Track which candidate
+      candidateEmail: candidateEmail || 'unknown',
       totalScore: object.totalScore,
       categoryScores: object.categoryScores,
       strengths: object.strengths,
       areasForImprovement: object.areasForImprovement,
       finalAssessment: object.finalAssessment,
       createdAt: new Date().toISOString(),
-      transcript: transcript, // Save the ORIGINAL transcript array
+      transcript: transcript,
     };
 
-    console.log('Feedback object to save:', {
-      ...feedback,
-      transcript: `[${transcript.length} messages]` // Don't log full transcript again
-    });
+    console.log('Saving feedback to Firestore...');
 
     let feedbackRef;
 
@@ -182,7 +221,6 @@ export async function createFeedback(params: CreateFeedbackParams) {
       console.log('Creating new feedback document with ID:', feedbackRef.id);
     }
 
-    console.log('Saving feedback to Firestore...');
     await feedbackRef.set(feedback);
     console.log('✅ Feedback saved to Firestore');
 
@@ -194,7 +232,6 @@ export async function createFeedback(params: CreateFeedbackParams) {
       const interviewData = interviewDoc.data();
       
       if (interviewData && interviewData.candidates && Array.isArray(interviewData.candidates)) {
-        // Update candidates array - mark this candidate as completed
         const updatedCandidates = interviewData.candidates.map((c: CandidateSession) => {
           if (c.email === candidateEmail) {
             return {
@@ -209,7 +246,6 @@ export async function createFeedback(params: CreateFeedbackParams) {
         await interviewRef.update({ candidates: updatedCandidates });
         console.log('✅ Candidate marked as completed');
       } else {
-        // Legacy format - mark interview as completed
         await interviewRef.update({
           completed: true,
           completedAt: new Date().toISOString(),
@@ -217,7 +253,6 @@ export async function createFeedback(params: CreateFeedbackParams) {
         console.log('✅ Interview marked as completed (legacy)');
       }
     } else {
-      // No candidate email (HR taking interview) - mark whole interview as completed
       await db.collection("interviews").doc(interviewId).update({
         completed: true,
         completedAt: new Date().toISOString(),
