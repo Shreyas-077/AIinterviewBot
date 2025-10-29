@@ -2,7 +2,7 @@
   "name": "interviewai-pro",
   "version": "1.0.0",
   "private": true,
-  "author": "Prajwal",
+  "author": "Shreyas",
   "description": "AI-powered interview practice platform with real-time voice feedback",
   "scripts": {
     "dev": "next dev --turbopack",
